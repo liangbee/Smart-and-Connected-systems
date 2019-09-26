@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="utf-8"> 
+    <title>HTTPD skill</title>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+  </head>
+  <body>
+    <h1>Button state and led control</h1>
+    <button type="button" name="led_on" id="led_on">led_on</button>
+    <button type="button" name="led_off" id="led_off">led_off</button>
+    <br><br>
+    <h2>button press: </h2>
+    <h2 id="msg"></h2>
+    <script type="text/javascript">
+      var esp_ip = 'http://192.168.1.136';
+      var led_status = $('#led_status');
+
+      led_on.bind('click', () => {
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", esp_ip, true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.send(JSON.stringify({
+            led_status:'1'
+        }));
+      })
+      led_off.bind('click', () => {
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", esp_ip, true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.send(JSON.stringify({
+            led_status: '0'
+        }));
+      })
+      function getbutton() {
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", esp_ip +'button', true);
+        xhr.onload = () => {
+          var resp = JSON.parse(xhr.response).msg;
+          console.log( resp);
+          $('#msg').html(resp);
+        }
+        xhr.send();
+      }
+    </script>
+  </body>
+</html>

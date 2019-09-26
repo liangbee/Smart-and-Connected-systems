@@ -1,0 +1,165 @@
+/* brushed dc motor control example
+
+   This example code is in the Public Domain (or CC0 licensed, at your option.)
+
+   Unless required by applicable law or agreed to in writing, this
+   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+   CONDITIONS OF ANY KIND, either express or implied.
+*/
+
+/*
+ * This example will show you how to use MCPWM module to control brushed dc motor.
+ * This code is tested with L298 motor driver.
+ * User may need to make changes according to the motor driver they use.
+*/
+
+#include <stdio.h>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_attr.h"
+
+#include "driver/mcpwm.h"
+#include "soc/mcpwm_reg.h"
+#include "soc/mcpwm_struct.h"
+
+#define GPIO_PWM0A_OUT 32   //Set GPIO 15 as PWM0A Enable pin Left
+#define GPIO_PWM0B_OUT 14   //Set GPIO A0 as PWM0B Enable pin Right
+
+// Left wheele GPIO input
+#define GPIO_LEFT_IN_ONE 15 //left 1 14
+#define GPIO_LEFT_IN_TWO 33 //left 2 33
+
+//Right wheele GPIO input
+#define GPIO_RIGHT_IN_ONE 27 // A5 4
+#define GPIO_RIGHT_IN_TWO 4 // 25
+
+static void mcpwm_example_gpio_initialize()
+{
+    // Left PWM wave
+    printf("initializing mcpwm gpio...\n");
+    mcpwm_gpio_init(MCPWM_UNIT_0, MCPWM0A, GPIO_PWM0A_OUT);
+    gpio_set_level(GPIO_PWM0A_OUT, 0);
+
+    // Right PWM wave
+    mcpwm_gpio_init(MCPWM_UNIT_0, MCPWM0B, GPIO_PWM0B_OUT);
+    gpio_set_level(GPIO_PWM0B_OUT, 0);
+
+
+    // Set left wheele GPIO output
+    gpio_pad_select_gpio(GPIO_LEFT_IN_ONE);
+    gpio_set_direction(GPIO_LEFT_IN_ONE, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_LEFT_IN_ONE, 0);
+
+    gpio_pad_select_gpio(GPIO_LEFT_IN_TWO);
+    gpio_set_direction(GPIO_LEFT_IN_TWO, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_LEFT_IN_TWO, 0);
+
+    //Right wheele GPIO output
+    gpio_pad_select_gpio(GPIO_RIGHT_IN_ONE);
+    gpio_set_direction(GPIO_RIGHT_IN_ONE, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_RIGHT_IN_ONE, 0);
+
+    gpio_pad_select_gpio(GPIO_RIGHT_IN_TWO);
+    gpio_set_direction(GPIO_RIGHT_IN_TWO, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_RIGHT_IN_TWO, 0);
+}
+
+/**
+ * @brief motor moves in forward direction, with duty cycle = duty %
+ */
+static void brushed_motor_forward(mcpwm_unit_t mcpwm_num, mcpwm_timer_t timer_num , float duty_cycle)
+{
+    // mcpwm_set_signal_low(mcpwm_num, timer_num, MCPWM_OPR_A);
+    // mcpwm_set_signal_low(mcpwm_num, timer_num, MCPWM_OPR_B);
+    mcpwm_set_duty(mcpwm_num, timer_num, MCPWM_OPR_A, duty_cycle);
+    mcpwm_set_duty(mcpwm_num, timer_num, MCPWM_OPR_B, duty_cycle);
+    // mcpwm_set_duty_type(mcpwm_num, timer_num, MCPWM_OPR_A, MCPWM_DUTY_MODE_0); //call this each time, if operator was previously in low/high state
+    // mcpwm_set_duty_type(mcpwm_num, timer_num, MCPWM_OPR_B, MCPWM_DUTY_MODE_0);
+
+    // Set GPIO One 1 high 1 low
+    gpio_set_level(GPIO_LEFT_IN_ONE, 1);
+    gpio_set_level(GPIO_LEFT_IN_TWO, 0);
+
+    // Set GPIO Two to high 1 low
+    gpio_set_level(GPIO_RIGHT_IN_ONE, 1);
+    gpio_set_level(GPIO_RIGHT_IN_TWO, 0);
+
+}
+
+/**
+ * @brief motor moves in backward direction, with duty cycle = duty %
+ */
+static void brushed_motor_backward(mcpwm_unit_t mcpwm_num, mcpwm_timer_t timer_num , float duty_cycle)
+{
+    // mcpwm_set_signal_low(mcpwm_num, timer_num, MCPWM_OPR_A);
+    mcpwm_set_duty(mcpwm_num, timer_num, MCPWM_OPR_A, duty_cycle);
+    mcpwm_set_duty(mcpwm_num, timer_num, MCPWM_OPR_B, duty_cycle);
+    // mcpwm_set_duty_type(mcpwm_num, timer_num, MCPWM_OPR_B, MCPWM_DUTY_MODE_0);  //call this each time, if operator was previously in low/high state
+
+    // Set GPIO One 1 high 1 low
+    gpio_set_level(GPIO_LEFT_IN_ONE, 0);
+    gpio_set_level(GPIO_LEFT_IN_TWO, 1);
+
+    // Set GPIO Two i high 1 low
+    gpio_set_level(GPIO_RIGHT_IN_ONE, 0);
+    gpio_set_level(GPIO_RIGHT_IN_TWO, 1);
+}
+
+/**
+ * @brief motor stop
+ */
+static void brushed_motor_stop(mcpwm_unit_t mcpwm_num, mcpwm_timer_t timer_num)
+{
+    mcpwm_set_signal_low(mcpwm_num, timer_num, MCPWM_OPR_A);
+    mcpwm_set_signal_low(mcpwm_num, timer_num, MCPWM_OPR_B);
+
+    // Set GPIO One both low
+    gpio_set_level(GPIO_LEFT_IN_ONE, 0);
+    gpio_set_level(GPIO_LEFT_IN_TWO, 0);
+
+    // Set GPIO Two both low
+    gpio_set_level(GPIO_RIGHT_IN_ONE, 0);
+    gpio_set_level(GPIO_RIGHT_IN_TWO, 0);
+}
+
+/**
+ * @brief Configure MCPWM module for brushed dc motor
+ */
+static void mcpwm_example_brushed_motor_control(void *arg)
+{
+    //1. mcpwm gpio initialization
+    mcpwm_example_gpio_initialize();
+
+    //2. initial mcpwm configuration
+    printf("!!!!!!!!!!!!!!Configuring Initial Parameters of mcpwm...\n");
+    mcpwm_config_t pwm_config;
+    printf("1");
+    pwm_config.frequency = 1000;    //frequency = 500Hz,
+    printf("2");
+    pwm_config.cmpr_a = 0;    //duty cycle of PWMxA = 0
+    printf("3");
+    pwm_config.cmpr_b = 0;    //duty cycle of PWMxb = 0
+    printf("4");
+    pwm_config.counter_mode = MCPWM_UP_COUNTER;
+    printf("5");
+    pwm_config.duty_mode = MCPWM_DUTY_MODE_0;
+    printf("6");
+    mcpwm_init(MCPWM_UNIT_0, MCPWM_TIMER_0, &pwm_config);    //Configure PWM0A & PWM0B with above settings
+    printf("7");
+    while (1) {
+        printf("entering whileloop");
+        brushed_motor_forward(MCPWM_UNIT_0, MCPWM_TIMER_0, 100);
+        vTaskDelay(2000 / portTICK_RATE_MS);
+        brushed_motor_backward(MCPWM_UNIT_0, MCPWM_TIMER_0, 100);
+        vTaskDelay(2000 / portTICK_RATE_MS);
+        brushed_motor_stop(MCPWM_UNIT_0, MCPWM_TIMER_0);
+        vTaskDelay(2000 / portTICK_RATE_MS);
+    }
+}
+
+void app_main()
+{
+    printf("Testing brushed motor...\n");
+    xTaskCreate(mcpwm_example_brushed_motor_control, "mcpwm_examlpe_brushed_motor_control", 4096, NULL, 5, NULL);
+}
